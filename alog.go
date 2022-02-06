@@ -47,7 +47,7 @@ func (al Alog) Start() {
 		select {
 		case msg := <-al.msgCh:
 			wg.Add(1)
-			al.write(msg, wg)
+			go al.write(msg, wg)
 		case <-al.shutdownCh:
 			wg.Wait()
 			al.shutdown()
