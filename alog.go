@@ -29,18 +29,30 @@ func New(w io.Writer) *Alog {
 		w = os.Stdout
 	}
 	return &Alog{
-		dest:    w,
-		msgCh:   make(chan string),
-		errorCh: make(chan error),
-		m: &sync.Mutex{},
+		dest:               w,
+		msgCh:              make(chan string),
+		errorCh:            make(chan error),
+		m:                  &sync.Mutex{},
+		shutdownCh:         make(chan struct{}),
+		shutdownCompleteCh: make(chan struct{}),
 	}
 }
 
 // Start begins the message loop for the asynchronous logger. It should be initiated as a goroutine to prevent
 // the caller from being blocked.
 func (al Alog) Start() {
-	for msg:= range al.msgCh {
-		go al.write(msg, nil)
+	wg := &sync.WaitGroup{}
+
+	for {
+		select {
+		case msg := <-al.msgCh:
+			wg.Add(1)
+			al.write(msg, wg)
+		case <-al.shutdownCh:
+			wg.Wait()
+			al.shutdown()
+			return
+		}		
 	}
 
 }
@@ -53,30 +65,34 @@ func (al Alog) formatMessage(msg string) string {
 }
 
 func (al Alog) write(msg string, wg *sync.WaitGroup) {
-	// ** mutex should be unlocked in such a way that it will be called both when the write() 
+	// ** mutex should be unlocked in such a way that it will be called both when the write()
 	// method returns normally as well as in the event of a panic being generated during its execution.
 	defer al.m.Unlock()
+
+	defer wg.Done()
 
 	msg_bytes := []byte(al.formatMessage(msg))
 
 	al.m.Lock()
 	_, err := al.dest.Write(msg_bytes)
-	
 
 	if err != nil {
 		// **
 		/*
-		If something goes wrong when writing to the log, the code will send an error to the error channel. 
-		While this gives the library a great way to communicate these errors, the logger will deadlock
-		 if nothing is receiving those messages. To make the logger more robust, update the code 
-		 in the write() method to use a goroutine to send the error to errorCh.
+			If something goes wrong when writing to the log, the code will send an error to the error channel.
+			While this gives the library a great way to communicate these errors, the logger will deadlock
+			 if nothing is receiving those messages. To make the logger more robust, update the code
+			 in the write() method to use a goroutine to send the error to errorCh.
 		*/
 		//
-		go func(){al.errorCh <- err}()
+		go func() { al.errorCh <- err }()
 	}
 }
 
 func (al Alog) shutdown() {
+	close(al.msgCh)
+
+	al.shutdownCompleteCh <- struct{}{}
 }
 
 // MessageChannel returns a channel that accepts messages that should be written to the log.
@@ -94,6 +110,8 @@ func (al Alog) ErrorChannel() <-chan error {
 // Stop shuts down the logger. It will wait for all pending messages to be written and then return.
 // The logger will no longer function after this method has been called.
 func (al Alog) Stop() {
+	al.shutdownCh <- struct{}{}
+	<-al.shutdownCompleteCh
 }
 
 // Write synchronously sends the message to the log output
