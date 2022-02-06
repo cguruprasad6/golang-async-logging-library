@@ -56,7 +56,7 @@ func (al Alog) write(msg string, wg *sync.WaitGroup) {
 	// ** mutex should be unlocked in such a way that it will be called both when the write() 
 	// method returns normally as well as in the event of a panic being generated during its execution.
 	defer al.m.Unlock()
-	
+
 	msg_bytes := []byte(al.formatMessage(msg))
 
 	al.m.Lock()
@@ -71,6 +71,7 @@ func (al Alog) write(msg string, wg *sync.WaitGroup) {
 		 if nothing is receiving those messages. To make the logger more robust, update the code 
 		 in the write() method to use a goroutine to send the error to errorCh.
 		*/
+		//
 		go func(){al.errorCh <- err}()
 	}
 }
